@@ -161,9 +161,9 @@ All completed configurations are shown below. Every row uses the same 93.62% flo
 
 The final row above 90% is the selected configuration. Huffman coding preserves the evaluated accuracy because it changes the storage representation after quantization; the encoded estimate falls from 1.631 MB to 1.313 MB for the 20% pruned model.
 
-![Compression sweep parallel coordinates](compression_full/parallel_coordinates.png)
+![Complete Section 3 compression sweep parallel coordinates](section3_parallel_coordinates.png)
 
-The plot above is generated locally by `compress.py` from the original bit-width sweep CSV. For the complete Section 3 table, use the W&B script below with a CSV containing the rows in the table.
+The plot above is generated locally by `generate_section3_plot.py` from all 13 rows in `section3_results.csv`. The selected final configuration is highlighted in red. For a hosted W&B version, use the script below.
 
 ### 3.4 Generating the W&B parallel-coordinates plot
 

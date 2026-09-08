@@ -27,6 +27,7 @@ Files
 - `compress.py`: manual weight/activation quantization, calibration, evaluation, and sweep plots
 - `section3_results.csv`: complete measured configuration table for W&B visualization
 - `wandb_section3.py`: uploads Section 3 results and logs a W&B parallel-coordinates chart
+- `generate_section3_plot.py`: generates the complete local Section 3 plot
 - `requirements.txt`: minimal dependencies
 
 Notes for Q1 report
