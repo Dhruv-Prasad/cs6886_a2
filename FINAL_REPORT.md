@@ -6,7 +6,7 @@
 
 ## Abstract
 
-This project trains MobileNet-v2 on CIFAR-10 and evaluates a manually implemented, configurable quantization method for model weights and activations. The uncompressed pretrained baseline reaches **93.62%** test top-1 accuracy after 150 epochs. The selected 8-bit configuration reaches **92.92%**, while reducing the estimated weight storage by **4.00x** and the peak activation storage by **3.99x**. The estimated compressed model size is **2.237 MB**, compared with an approximately **9.192 MB** floating-point checkpoint.
+This project trains MobileNet-v2 on CIFAR-10 and evaluates a manually implemented, configurable compression method for model weights and activations. The uncompressed pretrained baseline reaches **93.62%** test top-1 accuracy after 150 epochs. The selected model combines 20% magnitude pruning, mixed 5/6/8-bit weights, 8-bit activations, and per-layer Huffman coding. It reaches **90.49%** accuracy, with **6.812x** estimated weight compression and an estimated **1.313 MB** model size, compared with an approximately **9.192 MB** floating-point checkpoint.
 
 ## 1. Training Baseline
 
@@ -147,6 +147,7 @@ The sweep evaluates 8-bit, 6-bit, and 4-bit weights and activations using the sa
 | 8 | 93.62% | **92.92%** | 0.70 pp | **4.00x** | **3.99x** | **2.237 MB** |
 | 6 | 93.62% | 74.01% | 19.61 pp | 5.33x | 5.31x | 1.678 MB |
 | 4 | 93.62% | 11.19% | 82.43 pp | 8.00x | 7.94x | 1.119 MB |
+| 20% prune + mixed 5/6/8 + Huffman | 93.62% | **90.49%** | 3.13 pp | **6.812x** | **3.986x** | **1.313 MB** |
 
 An additional local 8-bit comparison using channel-wise weight scales reached **93.30%** accuracy, compared with **92.92%** for layer-wise weights. Its metadata-aware weight ratio was **3.88x**, compared with **4.00x** for layer-wise weights. Thus channel-wise quantization improves accuracy by 0.38 percentage points relative to the current layer-wise 8-bit result, but does not improve the storage ratio.
 
@@ -160,6 +161,10 @@ A more aggressive mixed policy was then tested: depthwise convolution weights us
 
 The channel-wise mixed variant reached **92.83%** accuracy, a **5.09x** weight ratio, and an estimated **1.758 MB** model size. It improves accuracy by 0.77 percentage points over layer-wise mixed precision, but its additional scale metadata costs 0.20 MB and reduces the compression ratio.
 
+### 3.3 Pruning and Huffman experiment
+
+The final experiment combines 20% per-tensor magnitude pruning, mixed 5/6/8-bit weight quantization, 8-bit activations, and independent per-layer Huffman coding. It reached **90.49%** accuracy, with an estimated **1.313 MB** weight/model size and a **6.812x** metadata-aware weight compression ratio. The 20% pruning mask contains 440,535 pruned weights and is included as one mask bit per model parameter in the estimate. A 30% pruning plus Huffman run reached only 84.94%, so 20% is the selected sparsity level.
+
 ### 3.2 Hybrid layer/channel experiment
 
 The hybrid 8-bit policy uses channel-wise scales only for intermediate convolution weights. The first convolution, final classifier, biases, and normalization parameters use layer-wise scales. It reached **93.02%** accuracy, a **3.881x** metadata-aware weight ratio, and an estimated **2.305 MB** model size. This is nearly the same accuracy as fully channel-wise 8-bit quantization, while explicitly protecting the input and output boundaries, but it does not beat mixed 6/8-bit quantization for size reduction.
@@ -170,18 +175,18 @@ The plot above is generated locally by `compress.py` from the measured sweep CSV
 
 ## 4. Compression Analysis and Selected Configuration
 
-The selected configuration is **mixed 5/6/8-bit weights with 8-bit activations and layer-wise weight scales**. It is the smallest measured configuration that retains accuracy above the 90% selection threshold.
+The selected configuration is **20% magnitude pruning + mixed 5/6/8-bit weights + 8-bit activations + per-layer Huffman encoding**, with layer-wise quantization scales. It is the smallest measured configuration that retains accuracy above the 90% selection threshold.
 
-Pruning is available as a further size-reduction extension, but no pruned accuracy result is claimed in this report until a pruning sweep is run and evaluated on the test set. The reproducible command is documented in the README.
+The selected configuration was evaluated directly on the CIFAR-10 test set after pruning and fake quantization. Huffman coding changes the storage estimate, not the evaluated tensor values; a deployment serializer would need to store the per-layer codebooks, quantized values, scales, and pruning mask.
 
-For maximum accuracy rather than maximum compression ratio, the channel-wise 8-bit variant is a viable alternative: it reaches 93.30% test accuracy, only 0.32 percentage points below the floating-point baseline. The final selection is mixed 5/6/8-bit layer-wise quantization because it provides stronger size reduction while retaining 91.80% accuracy.
+For maximum accuracy rather than maximum compression ratio, the channel-wise 8-bit variant remains a viable alternative at 93.30%. The final selection is the 20% pruned Huffman model because it provides substantially stronger size reduction while retaining 90.49% accuracy.
 
 ### 4.1 Weight compression ratio
 
-The measured estimated weight ratio is:
+For the selected pruned and Huffman-coded model, the measured estimated weight ratio is:
 
 $$
-\text{weight ratio} = \frac{\text{32-bit floating-point storage}}{\text{8-bit storage plus scale metadata}} = \mathbf{3.999x}.
+	ext{weight ratio} = \frac{\text{32-bit floating-point storage}}{\text{Huffman data + codebooks + scales + mask}} = \mathbf{6.812x}.
 $$
 
 ### 4.2 Activation compression ratio
@@ -196,11 +201,11 @@ The peak activation size used in the estimate was 98,304 elements per sample.
 
 ### 4.3 Accuracy
 
-The selected 8-bit model reaches **92.92%** test top-1 accuracy, a decrease of only **0.70 percentage points** from the 93.62% baseline.
+The selected model reaches **90.49%** test top-1 accuracy, a decrease of **3.13 percentage points** from the 93.62% baseline. This is the smallest evaluated model that remains above the 90% target.
 
 ### 4.4 Final estimated model size
 
-The estimated 8-bit weight/model size, including weight scale metadata, is **2.237 MB**. The corresponding peak activation storage estimate, including activation scale metadata, is **0.0987 MB per sample**. The original floating-point checkpoint is approximately 9.192 MB on disk.
+The estimated Huffman-coded weight/model size, including codebooks, weight scales, and the pruning mask, is **1.313 MB**. The corresponding peak activation storage estimate, including activation scale metadata, is **0.0987 MB per sample**. The original floating-point checkpoint is approximately 9.192 MB on disk.
 
 ## 5. Reproducibility and Repository
 
@@ -235,7 +240,11 @@ Run the compression sweep using a best-model checkpoint:
 ```bash
 python compress.py \
   --checkpoint pretrained_outputs/best_model.pth \
-  --bits 8 6 4 \
+  --bits 8 \
+  --weight-policy mixed_5_6_8 \
+  --weight-granularity layer \
+  --sparsity 0.20 \
+  --encoding huffman \
   --calibration-batches 20 \
   --batch-size 128 \
   --num-workers 2 \
@@ -259,6 +268,6 @@ The repository separates baseline training/evaluation (`train.py`) from compress
 
 ## Conclusion
 
-Mixed-precision symmetric quantization provides the best measured accuracy-compression trade-off in this experiment. The final 5/6/8-bit policy reduces estimated weight storage by 5.319 times and preserves 91.80% CIFAR-10 test accuracy, 1.82 percentage points below the uncompressed baseline. Uniform 6-bit quantization and 4-bit depthwise quantization lose too much accuracy, while protecting sensitive layers with 8 bits makes a smaller model above 90% possible.
+The final pruned, Huffman-coded mixed-precision model provides the best measured accuracy-compression trade-off in this experiment. It reduces estimated weight storage by **6.812x** and preserves **90.49%** CIFAR-10 test accuracy, 3.13 percentage points below the uncompressed baseline. Uniform 6-bit quantization, 4-bit depthwise quantization, and 30% pruning lose too much accuracy, while 20% pruning plus per-layer Huffman coding produces the smallest measured model above 90%.
 
 The implemented channel-wise experiment shows the expected trade-off: finer weight scales improve 8-bit accuracy to 93.30%, but additional scale metadata reduces the weight ratio to 3.88x. It is therefore useful when accuracy is the primary objective, while layer-wise 8-bit quantization remains the selected compression configuration.
