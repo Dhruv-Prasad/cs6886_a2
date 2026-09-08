@@ -25,6 +25,8 @@ Options
 Files
 - `train.py`: training and evaluation script
 - `compress.py`: manual weight/activation quantization, calibration, evaluation, and sweep plots
+- `section3_results.csv`: complete measured configuration table for W&B visualization
+- `wandb_section3.py`: uploads Section 3 results and logs a W&B parallel-coordinates chart
 - `requirements.txt`: minimal dependencies
 
 Notes for Q1 report

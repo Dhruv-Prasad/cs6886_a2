@@ -140,38 +140,77 @@ These are packed-storage estimates. The evaluation checkpoint itself remains a f
 
 ## 3. Compression Sweep
 
-The sweep evaluates 8-bit, 6-bit, and 4-bit weights and activations using the same baseline checkpoint and 20 calibration batches. The full measured results are stored in `compression_full/compression_results.csv`.
+All completed configurations are shown below. Every row uses the same 93.62% floating-point baseline and 8-bit activations unless the configuration label says otherwise. “Layer” and “channel” refer to scale granularity; mixed bit widths are assigned by tensor role. Sizes include scale metadata and, where applicable, pruning masks and Huffman codebooks.
 
-| Weight/activation bits | Baseline accuracy | Quantized accuracy | Accuracy drop | Weight ratio | Activation ratio | Estimated model size |
-|---:|---:|---:|---:|---:|---:|---:| 
-| 8 | 93.62% | **92.92%** | 0.70 pp | **4.00x** | **3.99x** | **2.237 MB** |
-| 6 | 93.62% | 74.01% | 19.61 pp | 5.33x | 5.31x | 1.678 MB |
-| 4 | 93.62% | 11.19% | 82.43 pp | 8.00x | 7.94x | 1.119 MB |
-| 20% prune + mixed 5/6/8 + Huffman | 93.62% | **90.49%** | 3.13 pp | **6.812x** | **3.986x** | **1.313 MB** |
+| Configuration | Accuracy | Drop (pp) | Weight ratio | Activation ratio | Estimated weight/model size (MB) |
+|---|---:|---:|---:|---:|---:|
+| Uniform 8-bit, layer-wise | 92.92% | 0.70 | 4.000x | 3.986x | 2.237 |
+| Uniform 6-bit, layer-wise | 74.01% | 19.61 | 5.331x | 5.308x | 1.678 |
+| Uniform 4-bit, layer-wise | 11.19% | 82.43 | 7.995x | 7.943x | 1.119 |
+| Uniform 8-bit, channel-wise | 93.02% | 0.60 | 3.881x | 3.986x | 2.305 |
+| Uniform 6-bit, channel-wise | 80.33% | 13.29 | 5.124x | 5.308x | 1.746 |
+| Mixed 6/8-bit, layer-wise | 92.06% | 1.56 | 5.294x | 3.986x | 1.690 |
+| Mixed 6/8-bit, channel-wise | 92.83% | 0.79 | 5.089x | 3.986x | 1.758 |
+| Mixed 4/6/8-bit, layer-wise | 85.55% | 8.07 | 5.344x | 3.986x | 1.674 |
+| Mixed 5/6/8-bit, layer-wise | 91.80% | 1.82 | 5.319x | 3.986x | 1.682 |
+| Uniform 8-bit, hybrid scales | 93.02% | 0.60 | 3.881x | 3.986x | 2.305 |
+| 10% prune + mixed 5/6/8-bit | 91.55% | 2.07 | 4.984x | 3.986x | 1.795 |
+| 20% prune + mixed 5/6/8-bit | 90.49% | 3.13 | 5.486x | 3.986x | 1.631 |
+| **20% prune + mixed 5/6/8-bit + Huffman** | **90.49%** | **3.13** | **6.812x** | **3.986x** | **1.313** |
+| 30% prune + mixed 5/6/8-bit + Huffman | 84.94% | 8.68 | 7.581x | 3.986x | 1.180 |
 
-An additional local 8-bit comparison using channel-wise weight scales reached **93.30%** accuracy, compared with **92.92%** for layer-wise weights. Its metadata-aware weight ratio was **3.88x**, compared with **4.00x** for layer-wise weights. Thus channel-wise quantization improves accuracy by 0.38 percentage points relative to the current layer-wise 8-bit result, but does not improve the storage ratio.
-
-The channel-wise 6-bit experiment reached **80.33%** accuracy with a **5.12x** metadata-aware weight ratio and an estimated **1.75 MB** model size. This is smaller than 8-bit storage, but the 13.29 percentage-point drop from the channel-wise 8-bit result is too large for the selected final configuration.
-
-### 3.1 Mixed-precision experiment
-
-The mixed policy uses 6-bit weights for intermediate convolution and linear tensors, while protecting the first convolution, final classifier, biases, and batch-normalization parameters with 8 bits. With layer-wise scales, it reached **92.06%** accuracy, a **5.29x** metadata-aware weight ratio, and an estimated **1.690 MB** model size. Activations remained 8-bit with a **3.99x** ratio.
-
-A more aggressive mixed policy was then tested: depthwise convolution weights use 5 bits, pointwise and linear weights use 6 bits, and the first convolution, final classifier, biases, and normalization parameters use 8 bits. This **5/6/8-bit** policy reached **91.80%** accuracy, a **5.319x** metadata-aware weight ratio, and an estimated **1.682 MB** model size. Activations remained 8-bit with a **3.99x** ratio. An even more aggressive 4/6/8-bit policy reached only 85.55%, so 4-bit depthwise weights were rejected.
-
-The channel-wise mixed variant reached **92.83%** accuracy, a **5.09x** weight ratio, and an estimated **1.758 MB** model size. It improves accuracy by 0.77 percentage points over layer-wise mixed precision, but its additional scale metadata costs 0.20 MB and reduces the compression ratio.
-
-### 3.3 Pruning and Huffman experiment
-
-The final experiment combines 20% per-tensor magnitude pruning, mixed 5/6/8-bit weight quantization, 8-bit activations, and independent per-layer Huffman coding. It reached **90.49%** accuracy, with an estimated **1.313 MB** weight/model size and a **6.812x** metadata-aware weight compression ratio. The 20% pruning mask contains 440,535 pruned weights and is included as one mask bit per model parameter in the estimate. A 30% pruning plus Huffman run reached only 84.94%, so 20% is the selected sparsity level.
-
-### 3.2 Hybrid layer/channel experiment
-
-The hybrid 8-bit policy uses channel-wise scales only for intermediate convolution weights. The first convolution, final classifier, biases, and normalization parameters use layer-wise scales. It reached **93.02%** accuracy, a **3.881x** metadata-aware weight ratio, and an estimated **2.305 MB** model size. This is nearly the same accuracy as fully channel-wise 8-bit quantization, while explicitly protecting the input and output boundaries, but it does not beat mixed 6/8-bit quantization for size reduction.
+The final row above 90% is the selected configuration. Huffman coding preserves the evaluated accuracy because it changes the storage representation after quantization; the encoded estimate falls from 1.631 MB to 1.313 MB for the 20% pruned model.
 
 ![Compression sweep parallel coordinates](compression_full/parallel_coordinates.png)
 
-The plot above is generated locally by `compress.py` from the measured sweep CSV. It is a parallel-coordinates figure suitable for the report. For a hosted Weights & Biases version, upload the rows of `compression_results.csv` as a W&B table and create a parallel-coordinates visualization using the columns `bits`, `accuracy`, `weight_ratio`, `activation_ratio`, and `model_size_mb`.
+The plot above is generated locally by `compress.py` from the original bit-width sweep CSV. For the complete Section 3 table, use the W&B script below with a CSV containing the rows in the table.
+
+### 3.4 Generating the W&B parallel-coordinates plot
+
+Install W&B and authenticate once:
+
+```bash
+pip install wandb
+wandb login
+```
+
+Create `wandb_section3.py` locally or in Colab. The repository includes `section3_results.csv` with the complete table columns: `configuration`, `accuracy`, `bits`, `weight_ratio`, `activation_ratio`, and `model_size_mb`.
+
+```python
+import csv
+import wandb
+
+run = wandb.init(project="cs6886-a2", name="section3-compression-sweep")
+
+columns = [
+  "configuration", "accuracy", "bits", "weight_ratio",
+  "activation_ratio", "model_size_mb",
+]
+rows = []
+with open("section3_results.csv", newline="") as file:
+  for item in csv.DictReader(file):
+    rows.append([
+      item["configuration"],
+      float(item["accuracy"]),
+      int(item["bits"]),
+      float(item["weight_ratio"]),
+      float(item["activation_ratio"]),
+      float(item["model_size_mb"]),
+    ])
+
+table = wandb.Table(columns=columns, data=rows)
+run.log({
+  "section3_results": table,
+  "parallel_coordinates": wandb.plot.parallel_coordinates(
+    table,
+    "accuracy",
+    ["bits", "accuracy", "weight_ratio", "activation_ratio", "model_size_mb"],
+  ),
+})
+run.finish()
+```
+
+After the script finishes, open the run in the W&B workspace and select the logged `parallel_coordinates` custom chart. For the report, export or screenshot that panel. The same chart is reproducible without W&B using the local `parallel_coordinates.png` generated by `compress.py`.
 
 ## 4. Compression Analysis and Selected Configuration
 
