@@ -45,9 +45,7 @@ def quantize_model_weights(model, bits, granularity='layer', policy='uniform'):
         for name, parameter in model.named_parameters():
             if parameter.is_floating_point():
                 parameter_bitwidth = parameter_bits(name, parameter, bits, policy)
-                channelwise = granularity == 'channel' and parameter.ndim >= 2 and (
-                    name.endswith('.weight') and parameter.ndim in (2, 4)
-                )
+                channelwise = should_use_channel_scale(name, parameter, granularity)
                 if channelwise:
                     reduce_dims = tuple(range(1, parameter.ndim))
                     limit = (1 << (parameter_bitwidth - 1)) - 1
@@ -58,6 +56,16 @@ def quantize_model_weights(model, bits, granularity='layer', policy='uniform'):
                 parameter.data.copy_(fake_quantize(parameter.data, parameter_bitwidth, scale))
                 metadata[name] = {'scales': int(scale.numel()), 'bits': parameter_bitwidth}
     return metadata
+
+
+def should_use_channel_scale(name, parameter, granularity):
+    if not name.endswith('.weight') or parameter.ndim not in (2, 4):
+        return False
+    if granularity == 'channel':
+        return True
+    if granularity == 'hybrid':
+        return name.startswith('features.') and name != 'features.0.0.weight'
+    return False
 
 
 def calibrate_activations(model, loader, device, batches, bits):
@@ -125,7 +133,7 @@ def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loade
         if not parameter.is_floating_point():
             continue
         parameter_bitwidth = parameter_bits(name, parameter, weight_bits, weight_policy)
-        channelwise = weight_granularity == 'channel' and parameter.ndim in (2, 4) and name.endswith('.weight')
+        channelwise = should_use_channel_scale(name, parameter, weight_granularity)
         weight_scale_count += parameter.shape[0] if channelwise else 1
         weight_bits_total += parameter.numel() * parameter_bitwidth
     weight_bits_total += weight_scale_count * 32
@@ -221,7 +229,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Manual MobileNet-v2 weight and activation quantization')
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--bits', nargs='+', type=int, default=[8, 6, 4])
-    parser.add_argument('--weight-granularity', choices=['layer', 'channel'], default='layer')
+    parser.add_argument('--weight-granularity', choices=['layer', 'channel', 'hybrid'], default='layer')
     parser.add_argument('--weight-policy', choices=['uniform', 'mixed_6_8'], default='uniform')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--num-workers', type=int, default=2)
