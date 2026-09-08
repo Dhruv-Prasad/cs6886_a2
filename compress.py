@@ -36,6 +36,22 @@ def parameter_bits(name, parameter, bits, policy='uniform'):
         if name.endswith('.weight') and parameter.ndim in (2, 4):
             return 6
         return 8
+    if policy == 'mixed_4_6_8':
+        if name == 'features.0.0.weight' or name == 'classifier.1.weight':
+            return 8
+        if name.endswith('.weight') and parameter.ndim == 4 and parameter.shape[1] == 1:
+            return 4
+        if name.endswith('.weight') and parameter.ndim in (2, 4):
+            return 6
+        return 8
+    if policy == 'mixed_5_6_8':
+        if name == 'features.0.0.weight' or name == 'classifier.1.weight':
+            return 8
+        if name.endswith('.weight') and parameter.ndim == 4 and parameter.shape[1] == 1:
+            return 5
+        if name.endswith('.weight') and parameter.ndim in (2, 4):
+            return 6
+        return 8
     return bits
 
 
@@ -230,7 +246,7 @@ def parse_args():
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--bits', nargs='+', type=int, default=[8, 6, 4])
     parser.add_argument('--weight-granularity', choices=['layer', 'channel', 'hybrid'], default='layer')
-    parser.add_argument('--weight-policy', choices=['uniform', 'mixed_6_8'], default='uniform')
+    parser.add_argument('--weight-policy', choices=['uniform', 'mixed_6_8', 'mixed_4_6_8', 'mixed_5_6_8'], default='uniform')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--num-workers', type=int, default=2)
     parser.add_argument('--calibration-batches', type=int, default=20)
