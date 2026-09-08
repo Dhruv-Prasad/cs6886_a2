@@ -1,6 +1,8 @@
 import argparse
 import csv
+import heapq
 import math
+from collections import Counter
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -88,6 +90,48 @@ def quantize_model_weights(model, bits, granularity='layer', policy='uniform'):
     return metadata
 
 
+def huffman_codebook_bits(values, symbol_bits):
+    frequencies = Counter(values)
+    if len(frequencies) <= 1:
+        data_bits = len(values)
+    else:
+        symbols = list(frequencies)
+        tree = [(frequencies[symbol], index, index) for index, symbol in enumerate(symbols)]
+        heapq.heapify(tree)
+        serial = len(tree)
+        while len(tree) > 1:
+            left = heapq.heappop(tree)
+            right = heapq.heappop(tree)
+            heapq.heappush(tree, (left[0] + right[0], serial, (left[2], right[2])))
+            serial += 1
+        code_lengths = {}
+
+        def assign(node, depth):
+            if isinstance(node, int):
+                code_lengths[symbols[node]] = max(depth, 1)
+                return
+            assign(node[0], depth + 1)
+            assign(node[1], depth + 1)
+
+        assign(tree[0][2], 0)
+        data_bits = sum(frequencies[symbol] * code_lengths[symbol] for symbol in frequencies)
+    # Store each symbol and its code length in the per-layer codebook.
+    codebook_bits = len(frequencies) * (symbol_bits + 8)
+    return data_bits + codebook_bits
+
+
+def quantized_values(parameter, parameter_bits, channelwise):
+    if channelwise:
+        reduce_dims = tuple(range(1, parameter.ndim))
+        limit = (1 << (parameter_bits - 1)) - 1
+        scale = parameter.detach().abs().amax(dim=reduce_dims, keepdim=True) / limit
+        scale = torch.clamp(scale, min=torch.finfo(parameter.dtype).eps)
+    else:
+        _, scale = quantize_tensor(parameter, parameter_bits)
+    limit = (1 << (parameter_bits - 1)) - 1
+    return torch.clamp(torch.round(parameter / scale), -limit - 1, limit).to(torch.int32)
+
+
 def should_use_channel_scale(name, parameter, granularity):
     if not name.endswith('.weight') or parameter.ndim not in (2, 4):
         return False
@@ -155,7 +199,7 @@ def evaluate(model, loader, device, activation_scales=None, activation_bits=8):
     return loss_sum / total, 100.0 * correct / total
 
 
-def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loader, device, weight_granularity='layer', weight_policy='uniform', sparsity=0.0):
+def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loader, device, weight_granularity='layer', weight_policy='uniform', sparsity=0.0, encoding='raw'):
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     weight_scale_count = 0
     weight_bits_total = 0
@@ -175,6 +219,21 @@ def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loade
                 nonzero_bits += (parameter != 0).sum().item() * parameter_bitwidth
         mask_bits = parameter_count
         weight_bits_total = nonzero_bits + weight_scale_count * 32 + mask_bits
+    if encoding == 'huffman':
+        encoded_bits = 0
+        for name, parameter in model.named_parameters():
+            if not parameter.is_floating_point():
+                continue
+            parameter_bitwidth = parameter_bits(name, parameter, weight_bits, weight_policy)
+            channelwise = should_use_channel_scale(name, parameter, weight_granularity)
+            values = quantized_values(parameter, parameter_bitwidth, channelwise).flatten().tolist()
+            if sparsity > 0:
+                values = [value for value in values if value != 0]
+            encoded_bits += huffman_codebook_bits(values, parameter_bitwidth) if values else 0
+        encoded_bits += weight_scale_count * 32
+        if sparsity > 0:
+            encoded_bits += parameter_count
+        weight_bits_total = encoded_bits
 
     peak_elements = 0
     handles = []
@@ -229,9 +288,9 @@ def run(args):
         quantize_model_weights(model, bits, args.weight_granularity, args.weight_policy)
         scales = calibrate_activations(model, testloader, device, args.calibration_batches, bits)
         loss, accuracy = evaluate(model, testloader, device, scales, bits)
-        sizes = estimate_sizes(model, bits, bits, scales, testloader, device, args.weight_granularity, args.weight_policy, args.sparsity)
-        rows.append({'bits': bits, 'weight_policy': args.weight_policy, 'weight_granularity': args.weight_granularity, 'sparsity': args.sparsity, 'pruned_weights': sum(pruned.values()), 'baseline_accuracy': baseline_acc, 'accuracy': accuracy, 'loss': loss, **sizes})
-        print(f'{args.weight_policy} {bits}-bit: accuracy={accuracy:.2f}% weight_ratio={sizes["weight_ratio"]:.2f}x activation_ratio={sizes["activation_ratio"]:.2f}x')
+        sizes = estimate_sizes(model, bits, bits, scales, testloader, device, args.weight_granularity, args.weight_policy, args.sparsity, args.encoding)
+        rows.append({'bits': bits, 'weight_policy': args.weight_policy, 'weight_granularity': args.weight_granularity, 'encoding': args.encoding, 'sparsity': args.sparsity, 'pruned_weights': sum(pruned.values()), 'baseline_accuracy': baseline_acc, 'accuracy': accuracy, 'loss': loss, **sizes})
+        print(f'{args.weight_policy} {args.encoding} {bits}-bit: accuracy={accuracy:.2f}% weight_ratio={sizes["weight_ratio"]:.2f}x activation_ratio={sizes["activation_ratio"]:.2f}x')
 
     with (output_dir / 'compression_results.csv').open('w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=rows[0].keys())
@@ -270,7 +329,8 @@ def parse_args():
     parser.add_argument('--bits', nargs='+', type=int, default=[8, 6, 4])
     parser.add_argument('--weight-granularity', choices=['layer', 'channel', 'hybrid'], default='layer')
     parser.add_argument('--weight-policy', choices=['uniform', 'mixed_6_8', 'mixed_4_6_8', 'mixed_5_6_8'], default='uniform')
-    parser.add_argument('--sparsity', type=float, default=0.0, help='Global magnitude sparsity for convolution/linear weights')
+    parser.add_argument('--sparsity', type=float, default=0.0, help='Per-tensor magnitude sparsity for convolution/linear weights')
+    parser.add_argument('--encoding', choices=['raw', 'huffman'], default='raw', help='Weight storage encoding estimate')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--num-workers', type=int, default=2)
     parser.add_argument('--calibration-batches', type=int, default=20)

@@ -86,6 +86,10 @@ The compression implementation is in `compress.py`. It uses manual symmetric uni
 
 An optional magnitude-pruning stage is implemented before quantization. For each convolutional or linear weight tensor, the smallest-magnitude fraction specified by `--sparsity` is set to zero. For example, `--sparsity 0.30` removes approximately 30% of the weights in each eligible tensor. The sparse size estimate includes one mask bit per model parameter in addition to the quantized nonzero values and scale metadata. This prevents the reported size from assuming free sparsity metadata.
 
+### 2.5 Per-layer Huffman encoding extension
+
+The compression script also supports `--encoding huffman`. After quantization, each parameter tensor is treated as a separate symbol stream. A Huffman tree is constructed from that tensor's quantized integer frequencies, and the estimated storage includes the encoded data bits, one codebook entry per observed symbol, scale metadata, and pruning-mask bits when applicable. This is a storage estimate; inference continues to use fake-quantized tensors, and a production deployment would need a matching decoder/serializer.
+
 For a tensor $x$ and signed quantization width $b$, the integer range is approximately:
 
 $$

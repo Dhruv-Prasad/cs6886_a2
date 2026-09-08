@@ -80,6 +80,14 @@ Magnitude pruning can be combined with mixed quantization. The `--sparsity` valu
 python compress.py --checkpoint path/to/best_model.pth --bits 8 --weight-policy mixed_5_6_8 --weight-granularity layer --sparsity 0.30 --calibration-batches 20 --output-dir pruned_mixed_outputs
 ```
 
+To estimate per-layer Huffman storage after mixed quantization:
+
+```bash
+python compress.py --checkpoint path/to/best_model.pth --bits 8 --weight-policy mixed_5_6_8 --weight-granularity layer --encoding huffman --calibration-batches 20 --output-dir huffman_outputs
+```
+
+Huffman coding is estimated independently for each parameter tensor from its quantized symbol frequencies. The estimate includes one codebook entry per observed symbol, scale metadata, and pruning masks when pruning is enabled. The current evaluation still uses fake-quantized tensors; an actual packed deployment file would require a serializer using the reported codebooks.
+
 The mixed 6/8-bit channel-wise test reached 92.83% accuracy, 5.09x weight compression, and an estimated 1.758 MB model size. It improves accuracy over layer-wise mixed precision, but its additional scale metadata reduces compression.
 
 The hybrid 8-bit test uses channel-wise scales only for intermediate convolution weights and layer-wise scales at the first convolution, classifier, biases, and normalization parameters. It reached 93.02% accuracy, 3.88x weight compression, and an estimated 2.305 MB model size.
