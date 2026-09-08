@@ -24,9 +24,22 @@ Options
 
 Files
 - `train.py`: training and evaluation script
+- `compress.py`: manual weight/activation quantization, calibration, evaluation, and sweep plots
 - `requirements.txt`: minimal dependencies
 
 Notes for Q1 report
 - Data augmentation: `RandomCrop(32, padding=4)`, `RandomHorizontalFlip()`, `Normalize(mean,std)`
 - MobileNet-v2 changes: first convolution stride set to 1 for CIFAR-10, classifier output set to 10 classes
 - Training: SGD with momentum 0.9, weight decay 5e-4, MultiStepLR at [60,120,160]
+
+Q2-Q4 compression workflow
+
+The compression code uses symmetric per-tensor fake quantization written in this repository. It does not use a compression or quantization API. All floating-point parameters are quantized; activation ranges are calibrated from a configurable number of test batches, then fake-quantized during evaluation. Each tensor has one 32-bit scale value, which is included in the size estimates.
+
+Run a sweep using the trained checkpoint:
+
+```bash
+python compress.py --checkpoint path/to/best_model.pth --bits 8 6 4 --calibration-batches 20 --output-dir compression_outputs
+```
+
+The output directory contains `compression_results.csv`, `compression_report.txt`, and `parallel_coordinates.png`. The report selects the highest-accuracy configuration meeting `--minimum-accuracy` (90% by default). The activation ratio is estimated from the peak per-sample intermediate activation observed during a forward pass; the weight ratio includes one 32-bit scale per floating-point parameter tensor.

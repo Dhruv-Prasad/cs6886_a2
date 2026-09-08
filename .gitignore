@@ -16,3 +16,5 @@ build/
 *.egg-info/
 data/
 outputs_*/
+compression_*/
+pretrained_*/
