@@ -67,16 +67,6 @@ The output directory contains `compression_results.csv`, `compression_report.txt
 
 `--weight-granularity layer` uses one scale per weight tensor. `--weight-granularity channel` uses one scale per output channel for convolution and linear weights, while biases and batch-normalization parameters remain layer-wise. In the local 8-bit test, channel-wise quantization reached 93.30% versus 92.92% for layer-wise quantization, but its metadata reduced the weight ratio from 4.00x to 3.88x.
 
-Clarification: bit width is selected per parameter tensor by the mixed policy. Channel-wise quantization changes the number of scale values per output channel; it does not currently assign a different bit width to every channel.
-
-The channel-wise 6-bit test reached 80.33% accuracy, 5.12x weight compression, and an estimated 1.75 MB model size. It demonstrates the size/accuracy trade-off but is not recommended as the final model because of the large accuracy drop.
-
-The mixed 6/8-bit layer-wise test reached 92.06% accuracy, 5.29x weight compression, and an estimated 1.690 MB model size. It is currently the best measured size/accuracy trade-off.
-
-The more aggressive mixed 5/6/8-bit layer-wise test uses 5-bit depthwise weights, 6-bit pointwise/linear weights, and 8-bit protected tensors. It reached 91.80% accuracy, 5.32x weight compression, and an estimated 1.682 MB model size, making it the current recommended configuration for the 90% target.
-
-The mixed 4/6/8-bit attempt reached only 85.55% accuracy, so 4-bit depthwise weights are not used in the final configuration.
-
 Magnitude pruning can be combined with mixed quantization. The `--sparsity` value zeros the smallest-magnitude weights independently in each convolution/linear weight tensor before quantization. The size estimate includes one mask bit per model parameter, plus scale metadata:
 
 ```bash
@@ -89,8 +79,4 @@ To estimate per-layer Huffman storage after mixed quantization:
 python compress.py --checkpoint path/to/best_model.pth --bits 8 --weight-policy mixed_5_6_8 --weight-granularity layer --encoding huffman --calibration-batches 20 --output-dir huffman_outputs
 ```
 
-Huffman coding is estimated independently for each parameter tensor from its quantized symbol frequencies. The estimate includes one codebook entry per observed symbol, scale metadata, and pruning masks when pruning is enabled. The current evaluation still uses fake-quantized tensors; an actual packed deployment file would require a serializer using the reported codebooks.
-
-The mixed 6/8-bit channel-wise test reached 92.83% accuracy, 5.09x weight compression, and an estimated 1.758 MB model size. It improves accuracy over layer-wise mixed precision, but its additional scale metadata reduces compression.
-
-The hybrid 8-bit test uses channel-wise scales only for intermediate convolution weights and layer-wise scales at the first convolution, classifier, biases, and normalization parameters. It reached 93.02% accuracy, 3.88x weight compression, and an estimated 2.305 MB model size.
+Huffman coding is estimated independently for each parameter tensor from its quantized symbol frequencies. The estimate includes one codebook entry per observed symbol, scale metadata, and pruning masks when pruning is enabled. The current evaluation still uses fake-quantized tensors; an actual packed deployment file would require a serializer using the reported codebooks
