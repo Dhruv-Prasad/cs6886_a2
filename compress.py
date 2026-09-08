@@ -29,14 +29,23 @@ def fake_quantize(tensor, bits, scale=None):
     return torch.clamp(torch.round(tensor / scale), -limit - 1, limit) * scale
 
 
-def quantize_model_weights(model, bits):
+def quantize_model_weights(model, bits, granularity='layer'):
     metadata = {}
     with torch.no_grad():
         for name, parameter in model.named_parameters():
             if parameter.is_floating_point():
-                _, scale = quantize_tensor(parameter.data, bits)
+                channelwise = granularity == 'channel' and parameter.ndim >= 2 and (
+                    name.endswith('.weight') and parameter.ndim in (2, 4)
+                )
+                if channelwise:
+                    reduce_dims = tuple(range(1, parameter.ndim))
+                    limit = (1 << (bits - 1)) - 1
+                    scale = parameter.data.detach().abs().amax(dim=reduce_dims, keepdim=True) / limit
+                    scale = torch.clamp(scale, min=torch.finfo(parameter.dtype).eps)
+                else:
+                    _, scale = quantize_tensor(parameter.data, bits)
                 parameter.data.copy_(fake_quantize(parameter.data, bits, scale))
-                metadata[name] = float(scale.cpu())
+                metadata[name] = int(scale.numel())
     return metadata
 
 
@@ -97,9 +106,14 @@ def evaluate(model, loader, device, activation_scales=None, activation_bits=8):
     return loss_sum / total, 100.0 * correct / total
 
 
-def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loader, device):
+def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loader, device, weight_granularity='layer'):
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
-    weight_scale_count = sum(1 for parameter in model.parameters() if parameter.is_floating_point())
+    weight_scale_count = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.is_floating_point():
+            continue
+        channelwise = weight_granularity == 'channel' and parameter.ndim in (2, 4) and name.endswith('.weight')
+        weight_scale_count += parameter.shape[0] if channelwise else 1
     weight_bits_total = parameter_count * weight_bits + weight_scale_count * 32
 
     peak_elements = 0
@@ -151,11 +165,11 @@ def run(args):
     for bits in args.bits:
         model = load_model(args.checkpoint, device)
         baseline_loss, baseline_acc = evaluate(model, testloader, device)
-        quantize_model_weights(model, bits)
+        quantize_model_weights(model, bits, args.weight_granularity)
         scales = calibrate_activations(model, testloader, device, args.calibration_batches, bits)
         loss, accuracy = evaluate(model, testloader, device, scales, bits)
-        sizes = estimate_sizes(model, bits, bits, scales, testloader, device)
-        rows.append({'bits': bits, 'baseline_accuracy': baseline_acc, 'accuracy': accuracy, 'loss': loss, **sizes})
+        sizes = estimate_sizes(model, bits, bits, scales, testloader, device, args.weight_granularity)
+        rows.append({'bits': bits, 'weight_granularity': args.weight_granularity, 'baseline_accuracy': baseline_acc, 'accuracy': accuracy, 'loss': loss, **sizes})
         print(f'{bits}-bit: accuracy={accuracy:.2f}% weight_ratio={sizes["weight_ratio"]:.2f}x activation_ratio={sizes["activation_ratio"]:.2f}x')
 
     with (output_dir / 'compression_results.csv').open('w', newline='') as file:
@@ -193,6 +207,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Manual MobileNet-v2 weight and activation quantization')
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--bits', nargs='+', type=int, default=[8, 6, 4])
+    parser.add_argument('--weight-granularity', choices=['layer', 'channel'], default='layer')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--num-workers', type=int, default=2)
     parser.add_argument('--calibration-batches', type=int, default=20)

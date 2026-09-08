@@ -110,6 +110,8 @@ For evaluation, the integer value is dequantized as $\hat{x}_i=sq_i$. This is im
 
 The method is intentionally simple and reproducible. It uses one scale per tensor rather than a more complex per-channel representation.
 
+An optional channel-wise variant is also implemented. With `--weight-granularity channel`, convolution and linear weights receive one scale per output channel; biases and batch-normalization parameters remain layer-wise. This reduces the effect of outlier channels, but increases metadata storage.
+
 ### 2.3 Storage overheads
 
 For each floating-point parameter tensor, one 32-bit scale is stored. For each calibrated activation tensor, one 32-bit scale is stored. These scale values are included in the estimates.
@@ -138,6 +140,8 @@ The sweep evaluates 8-bit, 6-bit, and 4-bit weights and activations using the sa
 | 6 | 93.62% | 74.01% | 19.61 pp | 5.33x | 5.31x | 1.678 MB |
 | 4 | 93.62% | 11.19% | 82.43 pp | 8.00x | 7.94x | 1.119 MB |
 
+An additional local 8-bit comparison using channel-wise weight scales reached **93.30%** accuracy, compared with **92.92%** for layer-wise weights. Its metadata-aware weight ratio was **3.88x**, compared with **4.00x** for layer-wise weights. Thus channel-wise quantization improves accuracy by 0.38 percentage points relative to the current layer-wise 8-bit result, but does not improve the storage ratio.
+
 ![Compression sweep parallel coordinates](compression_full/parallel_coordinates.png)
 
 The plot above is generated locally by `compress.py` from the measured sweep CSV. It is a parallel-coordinates figure suitable for the report. For a hosted Weights & Biases version, upload the rows of `compression_results.csv` as a W&B table and create a parallel-coordinates visualization using the columns `bits`, `accuracy`, `weight_ratio`, `activation_ratio`, and `model_size_mb`.
@@ -145,6 +149,8 @@ The plot above is generated locally by `compress.py` from the measured sweep CSV
 ## 4. Compression Analysis and Selected Configuration
 
 The selected configuration is **8-bit weights and 8-bit activations**. It is the highest-compression configuration that retains accuracy close to the baseline and exceeds the 90% selection threshold used by the experiment.
+
+For maximum accuracy rather than maximum compression ratio, the channel-wise 8-bit variant is a viable alternative: it reaches 93.30% test accuracy, only 0.32 percentage points below the floating-point baseline. The final selection remains layer-wise 8-bit because the assignment prioritizes compression effectiveness while retaining high accuracy.
 
 ### 4.1 Weight compression ratio
 
@@ -230,3 +236,5 @@ The repository separates baseline training/evaluation (`train.py`) from compress
 ## Conclusion
 
 Manual 8-bit symmetric quantization provides the best accuracy-compression trade-off in this experiment. It reduces the estimated weight storage by approximately four times and preserves 92.92% CIFAR-10 test accuracy, only 0.70 percentage points below the uncompressed baseline. Lower bit widths provide better nominal compression but produce unacceptable accuracy loss with the current per-tensor calibration. Hessian-aware or per-channel quantization would be promising future improvements for 6-bit quantization, but the 8-bit configuration is the most defensible final result for this submission.
+
+The implemented channel-wise experiment shows the expected trade-off: finer weight scales improve 8-bit accuracy to 93.30%, but additional scale metadata reduces the weight ratio to 3.88x. It is therefore useful when accuracy is the primary objective, while layer-wise 8-bit quantization remains the selected compression configuration.
