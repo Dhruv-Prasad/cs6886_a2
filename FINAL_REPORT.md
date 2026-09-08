@@ -142,15 +142,21 @@ The sweep evaluates 8-bit, 6-bit, and 4-bit weights and activations using the sa
 
 An additional local 8-bit comparison using channel-wise weight scales reached **93.30%** accuracy, compared with **92.92%** for layer-wise weights. Its metadata-aware weight ratio was **3.88x**, compared with **4.00x** for layer-wise weights. Thus channel-wise quantization improves accuracy by 0.38 percentage points relative to the current layer-wise 8-bit result, but does not improve the storage ratio.
 
+The channel-wise 6-bit experiment reached **80.33%** accuracy with a **5.12x** metadata-aware weight ratio and an estimated **1.75 MB** model size. This is smaller than 8-bit storage, but the 13.29 percentage-point drop from the channel-wise 8-bit result is too large for the selected final configuration.
+
+### 3.1 Mixed-precision experiment
+
+The mixed policy uses 6-bit weights for intermediate convolution and linear tensors, while protecting the first convolution, final classifier, biases, and batch-normalization parameters with 8 bits. With layer-wise scales, it reached **92.06%** accuracy, a **5.29x** metadata-aware weight ratio, and an estimated **1.690 MB** model size. Activations remained 8-bit with a **3.99x** ratio.
+
 ![Compression sweep parallel coordinates](compression_full/parallel_coordinates.png)
 
 The plot above is generated locally by `compress.py` from the measured sweep CSV. It is a parallel-coordinates figure suitable for the report. For a hosted Weights & Biases version, upload the rows of `compression_results.csv` as a W&B table and create a parallel-coordinates visualization using the columns `bits`, `accuracy`, `weight_ratio`, `activation_ratio`, and `model_size_mb`.
 
 ## 4. Compression Analysis and Selected Configuration
 
-The selected configuration is **8-bit weights and 8-bit activations**. It is the highest-compression configuration that retains accuracy close to the baseline and exceeds the 90% selection threshold used by the experiment.
+The selected configuration is **mixed 6/8-bit weights with 8-bit activations and layer-wise weight scales**. It is the smallest measured configuration that retains accuracy above the 90% selection threshold.
 
-For maximum accuracy rather than maximum compression ratio, the channel-wise 8-bit variant is a viable alternative: it reaches 93.30% test accuracy, only 0.32 percentage points below the floating-point baseline. The final selection remains layer-wise 8-bit because the assignment prioritizes compression effectiveness while retaining high accuracy.
+For maximum accuracy rather than maximum compression ratio, the channel-wise 8-bit variant is a viable alternative: it reaches 93.30% test accuracy, only 0.32 percentage points below the floating-point baseline. The final selection is mixed 6/8-bit layer-wise quantization because it provides stronger size reduction while retaining 92.06% accuracy.
 
 ### 4.1 Weight compression ratio
 
@@ -235,6 +241,6 @@ The repository separates baseline training/evaluation (`train.py`) from compress
 
 ## Conclusion
 
-Manual 8-bit symmetric quantization provides the best accuracy-compression trade-off in this experiment. It reduces the estimated weight storage by approximately four times and preserves 92.92% CIFAR-10 test accuracy, only 0.70 percentage points below the uncompressed baseline. Lower bit widths provide better nominal compression but produce unacceptable accuracy loss with the current per-tensor calibration. Hessian-aware or per-channel quantization would be promising future improvements for 6-bit quantization, but the 8-bit configuration is the most defensible final result for this submission.
+Mixed-precision symmetric quantization provides the best measured accuracy-compression trade-off in this experiment. It reduces estimated weight storage by 5.29 times and preserves 92.06% CIFAR-10 test accuracy, 1.56 percentage points below the uncompressed baseline. Uniform 6-bit quantization loses too much accuracy, while protecting sensitive layers with 8 bits makes a useful intermediate policy possible.
 
 The implemented channel-wise experiment shows the expected trade-off: finer weight scales improve 8-bit accuracy to 93.30%, but additional scale metadata reduces the weight ratio to 3.88x. It is therefore useful when accuracy is the primary objective, while layer-wise 8-bit quantization remains the selected compression configuration.

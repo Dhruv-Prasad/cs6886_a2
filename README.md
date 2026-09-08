@@ -48,6 +48,16 @@ For per-output-channel weight scales on convolution and linear weights:
 python compress.py --checkpoint path/to/best_model.pth --bits 8 --weight-granularity channel --calibration-batches 20 --output-dir channel_outputs
 ```
 
+For mixed precision, use 6-bit weights for intermediate convolution/linear tensors and 8-bit weights for the first convolution, final classifier, biases, and normalization tensors:
+
+```bash
+python compress.py --checkpoint path/to/best_model.pth --bits 8 --weight-policy mixed_6_8 --weight-granularity layer --calibration-batches 20 --output-dir mixed_outputs
+```
+
 The output directory contains `compression_results.csv`, `compression_report.txt`, and `parallel_coordinates.png`. The report selects the highest-accuracy configuration meeting `--minimum-accuracy` (90% by default). The activation ratio is estimated from the peak per-sample intermediate activation observed during a forward pass; the weight ratio includes one 32-bit scale per floating-point parameter tensor.
 
 `--weight-granularity layer` uses one scale per weight tensor. `--weight-granularity channel` uses one scale per output channel for convolution and linear weights, while biases and batch-normalization parameters remain layer-wise. In the local 8-bit test, channel-wise quantization reached 93.30% versus 92.92% for layer-wise quantization, but its metadata reduced the weight ratio from 4.00x to 3.88x.
+
+The channel-wise 6-bit test reached 80.33% accuracy, 5.12x weight compression, and an estimated 1.75 MB model size. It demonstrates the size/accuracy trade-off but is not recommended as the final model because of the large accuracy drop.
+
+The mixed 6/8-bit layer-wise test reached 92.06% accuracy, 5.29x weight compression, and an estimated 1.690 MB model size. It is currently the best measured size/accuracy trade-off.
