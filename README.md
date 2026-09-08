@@ -61,3 +61,5 @@ The output directory contains `compression_results.csv`, `compression_report.txt
 The channel-wise 6-bit test reached 80.33% accuracy, 5.12x weight compression, and an estimated 1.75 MB model size. It demonstrates the size/accuracy trade-off but is not recommended as the final model because of the large accuracy drop.
 
 The mixed 6/8-bit layer-wise test reached 92.06% accuracy, 5.29x weight compression, and an estimated 1.690 MB model size. It is currently the best measured size/accuracy trade-off.
+
+The mixed 6/8-bit channel-wise test reached 92.83% accuracy, 5.09x weight compression, and an estimated 1.758 MB model size. It improves accuracy over layer-wise mixed precision, but its additional scale metadata reduces compression.

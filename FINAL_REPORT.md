@@ -148,6 +148,8 @@ The channel-wise 6-bit experiment reached **80.33%** accuracy with a **5.12x** m
 
 The mixed policy uses 6-bit weights for intermediate convolution and linear tensors, while protecting the first convolution, final classifier, biases, and batch-normalization parameters with 8 bits. With layer-wise scales, it reached **92.06%** accuracy, a **5.29x** metadata-aware weight ratio, and an estimated **1.690 MB** model size. Activations remained 8-bit with a **3.99x** ratio.
 
+The channel-wise mixed variant reached **92.83%** accuracy, a **5.09x** weight ratio, and an estimated **1.758 MB** model size. It improves accuracy by 0.77 percentage points over layer-wise mixed precision, but its additional scale metadata costs 0.20 MB and reduces the compression ratio.
+
 ![Compression sweep parallel coordinates](compression_full/parallel_coordinates.png)
 
 The plot above is generated locally by `compress.py` from the measured sweep CSV. It is a parallel-coordinates figure suitable for the report. For a hosted Weights & Biases version, upload the rows of `compression_results.csv` as a W&B table and create a parallel-coordinates visualization using the columns `bits`, `accuracy`, `weight_ratio`, `activation_ratio`, and `model_size_mb`.
