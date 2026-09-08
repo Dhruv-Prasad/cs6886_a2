@@ -55,6 +55,20 @@ def parameter_bits(name, parameter, bits, policy='uniform'):
     return bits
 
 
+def prune_model_weights(model, sparsity):
+    if not 0.0 <= sparsity < 1.0:
+        raise ValueError('sparsity must be in [0, 1)')
+    masks = {}
+    with torch.no_grad():
+        for name, parameter in model.named_parameters():
+            if parameter.is_floating_point() and parameter.ndim >= 2 and name.endswith('.weight'):
+                threshold = torch.quantile(parameter.data.abs().flatten(), sparsity)
+                mask = parameter.data.abs() > threshold
+                parameter.data.mul_(mask)
+                masks[name] = int(mask.numel() - mask.sum().item())
+    return masks
+
+
 def quantize_model_weights(model, bits, granularity='layer', policy='uniform'):
     metadata = {}
     with torch.no_grad():
@@ -141,7 +155,7 @@ def evaluate(model, loader, device, activation_scales=None, activation_bits=8):
     return loss_sum / total, 100.0 * correct / total
 
 
-def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loader, device, weight_granularity='layer', weight_policy='uniform'):
+def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loader, device, weight_granularity='layer', weight_policy='uniform', sparsity=0.0):
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     weight_scale_count = 0
     weight_bits_total = 0
@@ -153,6 +167,14 @@ def estimate_sizes(model, weight_bits, activation_bits, activation_scales, loade
         weight_scale_count += parameter.shape[0] if channelwise else 1
         weight_bits_total += parameter.numel() * parameter_bitwidth
     weight_bits_total += weight_scale_count * 32
+    if sparsity > 0:
+        nonzero_bits = 0
+        for name, parameter in model.named_parameters():
+            if parameter.is_floating_point():
+                parameter_bitwidth = parameter_bits(name, parameter, weight_bits, weight_policy)
+                nonzero_bits += (parameter != 0).sum().item() * parameter_bitwidth
+        mask_bits = parameter_count
+        weight_bits_total = nonzero_bits + weight_scale_count * 32 + mask_bits
 
     peak_elements = 0
     handles = []
@@ -203,11 +225,12 @@ def run(args):
     for bits in args.bits:
         model = load_model(args.checkpoint, device)
         baseline_loss, baseline_acc = evaluate(model, testloader, device)
+        pruned = prune_model_weights(model, args.sparsity)
         quantize_model_weights(model, bits, args.weight_granularity, args.weight_policy)
         scales = calibrate_activations(model, testloader, device, args.calibration_batches, bits)
         loss, accuracy = evaluate(model, testloader, device, scales, bits)
-        sizes = estimate_sizes(model, bits, bits, scales, testloader, device, args.weight_granularity, args.weight_policy)
-        rows.append({'bits': bits, 'weight_policy': args.weight_policy, 'weight_granularity': args.weight_granularity, 'baseline_accuracy': baseline_acc, 'accuracy': accuracy, 'loss': loss, **sizes})
+        sizes = estimate_sizes(model, bits, bits, scales, testloader, device, args.weight_granularity, args.weight_policy, args.sparsity)
+        rows.append({'bits': bits, 'weight_policy': args.weight_policy, 'weight_granularity': args.weight_granularity, 'sparsity': args.sparsity, 'pruned_weights': sum(pruned.values()), 'baseline_accuracy': baseline_acc, 'accuracy': accuracy, 'loss': loss, **sizes})
         print(f'{args.weight_policy} {bits}-bit: accuracy={accuracy:.2f}% weight_ratio={sizes["weight_ratio"]:.2f}x activation_ratio={sizes["activation_ratio"]:.2f}x')
 
     with (output_dir / 'compression_results.csv').open('w', newline='') as file:
@@ -247,6 +270,7 @@ def parse_args():
     parser.add_argument('--bits', nargs='+', type=int, default=[8, 6, 4])
     parser.add_argument('--weight-granularity', choices=['layer', 'channel', 'hybrid'], default='layer')
     parser.add_argument('--weight-policy', choices=['uniform', 'mixed_6_8', 'mixed_4_6_8', 'mixed_5_6_8'], default='uniform')
+    parser.add_argument('--sparsity', type=float, default=0.0, help='Global magnitude sparsity for convolution/linear weights')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--num-workers', type=int, default=2)
     parser.add_argument('--calibration-batches', type=int, default=20)

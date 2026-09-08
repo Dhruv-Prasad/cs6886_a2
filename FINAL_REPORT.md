@@ -82,6 +82,10 @@ The main failure modes observed during low-bit evaluation are:
 
 The compression implementation is in `compress.py`. It uses manual symmetric uniform quantization and does not call a quantization or compression library API.
 
+### 2.4 Magnitude pruning extension
+
+An optional magnitude-pruning stage is implemented before quantization. For each convolutional or linear weight tensor, the smallest-magnitude fraction specified by `--sparsity` is set to zero. For example, `--sparsity 0.30` removes approximately 30% of the weights in each eligible tensor. The sparse size estimate includes one mask bit per model parameter in addition to the quantized nonzero values and scale metadata. This prevents the reported size from assuming free sparsity metadata.
+
 For a tensor $x$ and signed quantization width $b$, the integer range is approximately:
 
 $$
@@ -163,6 +167,8 @@ The plot above is generated locally by `compress.py` from the measured sweep CSV
 ## 4. Compression Analysis and Selected Configuration
 
 The selected configuration is **mixed 5/6/8-bit weights with 8-bit activations and layer-wise weight scales**. It is the smallest measured configuration that retains accuracy above the 90% selection threshold.
+
+Pruning is available as a further size-reduction extension, but no pruned accuracy result is claimed in this report until a pruning sweep is run and evaluated on the test set. The reproducible command is documented in the README.
 
 For maximum accuracy rather than maximum compression ratio, the channel-wise 8-bit variant is a viable alternative: it reaches 93.30% test accuracy, only 0.32 percentage points below the floating-point baseline. The final selection is mixed 5/6/8-bit layer-wise quantization because it provides stronger size reduction while retaining 91.80% accuracy.
 
